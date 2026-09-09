@@ -107,18 +107,19 @@ useHead({
 
 .about__paragraph {
   font-family: var(--font-family-base);
-  font-size: 20px;
-  font-weight: var(--font-weight-semi-bold);
-  line-height: 1.6;
+  font-size: 26px;
+  font-weight: var(--font-weight-regular);
+  line-height: 1.7;
   color: var(--color-black);
   margin: 0;
   white-space: pre-wrap;
 }
 
 .about__paragraph--en {
-  font-size: 18px;
-  line-height: 1.55;
-  opacity: 0.85;
+  font-size: 22px;
+  font-weight: var(--font-weight-regular);
+  line-height: 1.6;
+  opacity: 0.8;
 }
 
 /* 태블릿 */
@@ -173,13 +174,13 @@ useHead({
   }
 
   .about__paragraph {
-    font-size: 15px;
-    line-height: 1.6;
+    font-size: 17px;
+    line-height: 1.7;
   }
 
   .about__paragraph--en {
-    font-size: 14px;
-    line-height: 1.55;
+    font-size: 15px;
+    line-height: 1.6;
   }
 }
 </style>
