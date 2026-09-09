@@ -4,6 +4,11 @@ useSeoMeta({
   ogTitle: 'ROLL ON!',
   description: '서울디자인고등학교 크리에이티브 디자인과 2기 졸업전시'
 })
+
+// 헤더가 페이지 위에 겹쳐서 떠있도록 — Hero가 헤더 너머까지 차지
+definePageMeta({
+  transparentHeader: true
+})
 </script>
 
 <template>
@@ -11,20 +16,46 @@ useSeoMeta({
     <!-- ============================================
          1. HERO
          ============================================ -->
-    <section class="home__hero" aria-label="메인 비주얼" data-animate="fade-up">
-      <div class="home__hero-inner">
-        <img
-          src="/hero-dice.png"
-          alt="ROLL ON! 메인 비주얼"
-          class="home__hero-image"
-          @error="$event.target.style.display = 'none'"
-        />
-        <!-- hero-dice.png 없으면 포스터 fallback -->
-        <img
-          src="/poster.png"
-          alt="졸업전시 포스터"
-          class="home__hero-image home__hero-image--fallback"
-        />
+    <section class="home__hero" aria-label="메인 비주얼">
+      <!-- 3D 주사위 배경 (decorative) -->
+      <ClientOnly>
+        <HeroDiceScene />
+      </ClientOnly>
+
+      <div class="home__hero-content">
+        <p class="home__hero-eyebrow">
+          서울디자인고등학교 크리에이티브 디자인과 2기 졸업전시
+        </p>
+
+        <!-- TODO: 메인 이미지 준비되면 교체 -->
+        <div class="home__hero-placeholder" aria-label="메인 이미지 (준비 중)">
+          <svg
+            class="home__hero-placeholder-icon"
+            width="64"
+            height="64"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+            <circle cx="8.5" cy="8.5" r="1.5" />
+            <path d="M21 15l-5-5L5 21" />
+          </svg>
+        </div>
+
+        <div class="home__hero-actions">
+          <NuxtLink to="/projects" class="home__hero-btn home__hero-btn--primary">
+            작품보러가기
+          </NuxtLink>
+          <!-- TODO: 인스타그램 실제 URL로 교체 -->
+          <a href="#" class="home__hero-btn home__hero-btn--secondary" @click.prevent>
+            인스타그램
+          </a>
+        </div>
       </div>
     </section>
 
@@ -110,50 +141,110 @@ useSeoMeta({
 </template>
 
 <style scoped>
+/* page root는 투명 — header background-color 가 직접 보이도록 함.
+   각 section(.home__hero, ...)이 자체 배경을 갖는다. */
 .home {
-  background-color: var(--color-white);
+  background-color: transparent;
 }
 
 /* ============================================
    HERO
    ============================================ */
 .home__hero {
+  position: relative;
   width: 100%;
   min-height: 100svh;
+  overflow: visible;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--header-height) 0 0;
+  padding-top: var(--header-height);
 }
 
-.home__hero-inner {
+.home__hero-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 64px;
   width: 100%;
   max-width: var(--container-max-width);
-  height: 100svh;
-  margin: 0 auto;
-  padding: 32px 64px;
+  pointer-events: auto;
+}
+
+.home__hero-eyebrow {
+  font-family: var(--font-family-base);
+  font-size: 26px;
+  font-weight: var(--font-weight-semi-bold, 600);
+  color: #111111;
+  letter-spacing: -0.03em;
+  line-height: 1.4;
+  margin: 0 0 60px;
+  white-space: nowrap;
+}
+
+.home__hero-placeholder {
+  width: clamp(280px, 29vw, 520px);
+  aspect-ratio: 1 / 0.84;
+  background: #ececec;
+  border-radius: 48px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 64px;
+  justify-content: center;
+  margin: 0 0 52px;
+  color: #c6c6c6;
 }
 
-.home__hero-image {
-  max-width: 100%;
-  max-height: calc(100svh - 64px);
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  display: none;
-}
-
-.home__hero-image:not([style]) {
+.home__hero-placeholder-icon {
   display: block;
 }
 
-/* fallback 이미지 — hero-dice.png 로드 실패 시 보여짐 */
-.home__hero-image--fallback {
-  display: block;
+.home__hero-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.home__hero-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 58px;
+  padding-inline: 40px;
+  border-radius: 999px;
+  font-family: var(--font-family-base);
+  font-size: 17px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 0;
+}
+
+.home__hero-btn--primary {
+  background: #000000;
+  color: #ffffff;
+}
+
+.home__hero-btn--primary:hover {
+  background: #202020;
+}
+
+.home__hero-btn--secondary {
+  background: #ffffff;
+  color: #111111;
+  border: 1.5px solid #111111;
+}
+
+.home__hero-btn--secondary:hover {
+  background: #f5f5f5;
 }
 
 /* ============================================
@@ -230,6 +321,7 @@ useSeoMeta({
   text-decoration: none;
   align-self: flex-start;
   transition: opacity 0.2s ease;
+  border-radius: 999px;
 }
 
 .home__about-cta:hover {
@@ -341,8 +433,25 @@ useSeoMeta({
    TABLET (768px ~ 1280px)
    ============================================ */
 @media (max-width: 1280px) {
-  .home__hero-inner {
-    padding: 24px 32px 48px;
+  .home__hero-content {
+    padding: 24px 32px;
+  }
+
+  .home__hero-eyebrow {
+    font-size: 22px;
+    margin-bottom: 48px;
+  }
+
+  .home__hero-placeholder {
+    width: clamp(240px, 36vw, 380px);
+    margin-bottom: 44px;
+    border-radius: 40px;
+  }
+
+  .home__hero-btn {
+    height: 54px;
+    padding-inline: 34px;
+    font-size: 16px;
   }
 
   .home__about {
@@ -405,13 +514,32 @@ useSeoMeta({
     padding-top: var(--header-height);
   }
 
-  .home__hero-inner {
-    height: calc(100svh - var(--header-height));
-    padding: 16px 20px 32px;
+  .home__hero-content {
+    padding: 16px 20px 24px;
   }
 
-  .home__hero-image {
-    max-height: calc(100svh - var(--header-height) - 48px);
+  .home__hero-eyebrow {
+    font-size: 17px;
+    white-space: normal;
+    margin-bottom: 36px;
+    padding: 0 4px;
+  }
+
+  .home__hero-placeholder {
+    width: min(75vw, 340px);
+    aspect-ratio: 1 / 0.84;
+    margin-bottom: 32px;
+    border-radius: 36px;
+  }
+
+  .home__hero-actions {
+    gap: 10px;
+  }
+
+  .home__hero-btn {
+    height: 50px;
+    padding-inline: 22px;
+    font-size: 15px;
   }
 
   /* About: 포스터 먼저 (1컬럼) */

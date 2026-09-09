@@ -64,6 +64,7 @@ onUnmounted(() => {
     class="header"
     :class="{
       'header--hidden': !isVisible && !isAtTop,
+      'header--at-top': isAtTop,
       'header--menu-open': isMobileMenuOpen
     }"
   >
@@ -186,7 +187,13 @@ onUnmounted(() => {
   top: 0;
   left: 0;
   z-index: 1000;
-  transition: transform 0.3s ease-in-out;
+  transition: transform 0.3s ease-in-out, background-color 0.25s ease-in-out;
+}
+
+/* 스크롤 시 흰 배경, 맨 위(isAtTop)에서만 투명 */
+.header--at-top {
+  background-color: transparent;
+  box-shadow: none;
 }
 
 .header--hidden {
