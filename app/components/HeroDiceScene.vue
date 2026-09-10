@@ -120,8 +120,7 @@ const DICE_CONFIGS: DiceConfig[] = [
     floatSpeed: 0.0004,
     rotAmp: deg(3),
     rotSpeed: 0.0003,
-    phase: 3.1,
-    hideOnMobile: true
+    phase: 3.1
   },
   // D. 우하단 - 큰 주사위
   {
@@ -296,12 +295,50 @@ const updateViewportFlag = () => {
   isMobileViewport.value = window.innerWidth <= 768
 }
 
+const BASE_VFOV = 36 // 데스크탑 가로 화면 기준 vertical FOV
+
+/**
+ * viewport aspect ratio에 맞춰 카메라 FOV 조정
+ * - aspect ratio가 작을수록 (모바일 세로) horizontal FOV가 좁아지므로
+ *   vertical FOV를 키워서 양옆 주사위가 보이도록 함
+ */
+const computeCameraFov = (aspect: number): number => {
+  const isLandscape = aspect >= 1
+  if (isLandscape) {
+    // 데스크탑: 16:9~21:9, BASE_VFOV 유지, 너무 와이드 (21:9)는 살짝 좁힘
+    if (aspect > 2.0) return BASE_VFOV - 4
+    if (aspect > 1.6) return BASE_VFOV - 2
+    return BASE_VFOV
+  }
+  // 모바일 세로 (aspect < 1): vertical FOV를 키워 horizontal 영역 확보
+  if (aspect < 0.5) return BASE_VFOV + 22
+  if (aspect < 0.65) return BASE_VFOV + 18
+  if (aspect < 0.8) return BASE_VFOV + 12
+  return BASE_VFOV + 6
+}
+
+/**
+ * viewport aspect ratio에 맞춰 카메라 z 거리 조정
+ * - 모바일 (aspect 작음): 카메라를 살짝 멀리 + 주사위를 안쪽으로 모음
+ */
+const computeCameraDistance = (aspect: number): number => {
+  if (aspect >= 1) return 10
+  if (aspect < 0.5) return 14
+  if (aspect < 0.65) return 13
+  if (aspect < 0.8) return 11.5
+  return 10.5
+}
+
 const handleResize = () => {
   if (!renderer || !camera || !containerRef.value) return
   const w = containerRef.value.clientWidth
   const h = containerRef.value.clientHeight
   renderer.setSize(w, h, false)
-  camera.aspect = w / h
+  const aspect = w / h
+  camera.aspect = aspect
+  camera.fov = computeCameraFov(aspect)
+  camera.position.z = computeCameraDistance(aspect)
+  camera.lookAt(0, 0, 0)
   camera.updateProjectionMatrix()
   updateViewportFlag()
 }
@@ -334,11 +371,6 @@ const animate = (time: number) => {
 
   // 개별 주사위 float + 회전
   for (const inst of diceInstances) {
-    if (inst.config.hideOnMobile && isMobileViewport.value) {
-      inst.group.visible = false
-      inst.shadow.mesh.visible = false
-      continue
-    }
     inst.group.visible = true
     inst.shadow.mesh.visible = true
     const t = time * inst.config.floatSpeed + inst.config.phase * 1000
@@ -402,8 +434,9 @@ onMounted(() => {
 
   // Scene + Camera
   scene = new THREE.Scene()
-  camera = new THREE.PerspectiveCamera(36, w / h, 0.1, 100)
-  camera.position.set(0, 0, 10)
+  const aspect = w / h
+  camera = new THREE.PerspectiveCamera(computeCameraFov(aspect), aspect, 0.1, 100)
+  camera.position.set(0, 0, computeCameraDistance(aspect))
   camera.lookAt(0, 0, 0)
 
   // Lights

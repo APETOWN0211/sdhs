@@ -19,8 +19,13 @@ onMounted(async () => {
 
 /** 카테고리 필터링 */
 const filteredProjects = computed(() => {
-  if (activeCategory.value === '전체') return projects.value
-  return projects.value.filter((p) => p.category === activeCategory.value)
+  const base = activeCategory.value === '전체'
+    ? projects.value
+    : projects.value.filter((p) => p.category === activeCategory.value)
+  // 가나다순 정렬
+  return [...base].sort((a, b) =>
+    a.student_name.localeCompare(b.student_name, 'ko-KR')
+  )
 })
 
 /** 카드 썸네일 배경 URL (thumbnail_path 없으면 fallback_thumbnail_path 사용) */

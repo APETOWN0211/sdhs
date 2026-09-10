@@ -9,6 +9,106 @@ useSeoMeta({
 definePageMeta({
   transparentHeader: true
 })
+
+/* ============================================================
+   히어로 섹션 자석 스크롤 (magnetic scroll-snap)
+   - wheel 한 번 → 가장 가까운 snap point로 부드럽게 정렬
+   - hero 구간 안에서만 작동, 그 외는 자유 스크롤
+   ============================================================ */
+const { $lenis } = useNuxtApp() as { $lenis?: { scrollTo: (target: number | string | HTMLElement, opts?: object) => void; actualScroll: number; stop: () => void; start: () => void } }
+
+const SNAP_DURATION = 0.55
+const easing = (t: number) => 1 - Math.pow(1 - t, 3) // easeOutCubic
+const SCROLL_THRESHOLD = 8 // 작은 wheel 입력은 무시 (touchpad 미세 스크롤 방지)
+
+let rafId: number | null = null
+let pendingTarget: number | null = null
+let lastWheelTime = 0
+let lastWheelDelta = 0
+
+const getHeroSnapPoints = (): { top: number; bottom: number } | null => {
+  const hero = document.querySelector<HTMLElement>('.home__hero')
+  if (!hero) return null
+  const top = hero.offsetTop
+  const bottom = top + hero.offsetHeight - window.innerHeight
+  return { top, bottom }
+}
+
+const performSnap = () => {
+  rafId = null
+  if (!$lenis || pendingTarget === null) return
+
+  // wheel이 연속으로 들어오면 가장 마지막 delta 기준으로 결정
+  const delta = lastWheelDelta
+  lastWheelDelta = 0
+
+  const current = $lenis.actualScroll
+  const points = getHeroSnapPoints()
+  if (!points) return
+
+  // hero 구간 밖이면 snap 안 함 (자유 스크롤)
+  if (current < points.top - 50 || current > points.bottom + 50) {
+    pendingTarget = null
+    return
+  }
+
+  // 사용자가 wheel 방향(down = 양수, up = 음수)
+  // 사용자가 충분히 멈췄다면(0.4s) 가장 가까운 snap point로 정렬
+  const now = performance.now()
+  const timeSinceLastWheel = now - lastWheelTime
+  if (timeSinceLastWheel < 50) {
+    // wheel 연속 입력 → 더 큰 wheel을 기다림
+    return
+  }
+
+  // hero 시작(top) 또는 끝(bottom) 중 현재 위치에 더 가까운 곳으로 정렬
+  const distToTop = Math.abs(current - points.top)
+  const distToBottom = Math.abs(current - points.bottom)
+  const snapPoint = distToTop < distToBottom ? points.top : points.bottom
+
+  $lenis.scrollTo(snapPoint, { duration: SNAP_DURATION, easing })
+  pendingTarget = null
+}
+
+const onWheel = (e: WheelEvent) => {
+  if (!$lenis) return
+  // 작은 wheel은 무시 (trackpad 관성 등)
+  if (Math.abs(e.deltaY) < SCROLL_THRESHOLD) return
+
+  lastWheelDelta = e.deltaY
+  lastWheelTime = performance.now()
+
+  // 짧은 debounce 후 가장 큰 delta로 snap 결정
+  if (rafId) cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(() => {
+    setTimeout(performSnap, 80)
+  })
+}
+
+const onKeyDown = (e: KeyboardEvent) => {
+  if (!$lenis) return
+  if (!['PageDown', 'PageUp', 'ArrowDown', 'ArrowUp', 'Home', 'End', ' '].includes(e.key)) return
+
+  const current = $lenis.actualScroll
+  const points = getHeroSnapPoints()
+  if (!points) return
+  if (current < points.top - 50 || current > points.bottom + 50) return
+
+  const goingDown = ['PageDown', 'ArrowDown', 'End', ' '].includes(e.key)
+  const target = goingDown ? points.bottom : points.top
+  $lenis.scrollTo(target, { duration: SNAP_DURATION, easing })
+}
+
+onMounted(() => {
+  window.addEventListener('wheel', onWheel, { passive: true })
+  window.addEventListener('keydown', onKeyDown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('wheel', onWheel)
+  window.removeEventListener('keydown', onKeyDown)
+  if (rafId) cancelAnimationFrame(rafId)
+})
 </script>
 
 <template>
@@ -512,6 +612,7 @@ definePageMeta({
   .home__hero {
     min-height: 100svh;
     padding-top: var(--header-height);
+    padding-bottom: 48px;
   }
 
   .home__hero-content {
