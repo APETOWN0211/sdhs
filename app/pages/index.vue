@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
             작품보러가기
           </NuxtLink>
           <!-- TODO: 인스타그램 실제 URL로 교체 -->
-          <a href="#" class="home__hero-btn home__hero-btn--secondary" @click.prevent>
+          <a href="https://www.instagram.com/roll_on.sdhs" class="home__hero-btn home__hero-btn--secondary" @click.prevent>
             인스타그램
           </a>
         </div>
