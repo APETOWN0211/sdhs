@@ -55,27 +55,42 @@ export interface PublicProjectSummary extends ProjectSummary {
 
 export const usePublicProjects = () => {
   const supabase = useSupabaseClient()
-  const list = useState<PublicProjectSummary[]>('public-projects', () => [])
-  const loading = useState<boolean>('public-projects-loading', () => false)
-  const error = useState<string | null>('public-projects-error', () => null)
 
-  const fetchAll = async () => {
-    loading.value = true
-    error.value = null
-    try {
-      const { data, error: err } = await supabase
+  /**
+   * 작품 목록 조회 (SSR-safe).
+   * - useAsyncData + 안정적 key('public-projects-list') 로 SSR 단계에서 fetch.
+   *   /works 진입 시 HTML 자체에 작품 정보가 포함되어 FCP/LCP 가 빨라진다.
+   * - server:true + client:false 가 기본값이므로 SSR 에서만 실행되고,
+   *   hydrate 시 서버에서 가져온 payload 를 즉시 사용한다.
+   * - 같은 key 로 두 번 이상 호출되어도 Nuxt 가 중복 fetch 하지 않는다.
+   */
+  const {
+    data: list,
+    pending: loading,
+    error: asyncError,
+    refresh
+  } = useAsyncData<PublicProjectSummary[]>(
+    'public-projects-list',
+    async () => {
+      // projects 메타 + 첫 번째 gallery image 만 select.
+      // description / short_description / created_at / updated_at 은
+      // 목록에 불필요하므로 가져오지 않는다 → 전송량/디코드 부담 감소.
+      const { data: projects, error: pErr } = await supabase
         .from('projects')
         .select('id, slug, title, student_name, category, thumbnail_path, is_published, sort_order')
         .eq('is_published', true)
         .order('sort_order', { ascending: true })
         .order('created_at', { ascending: true })
+      if (pErr) throw pErr
 
-      if (err) throw err
-      const projects = (data ?? []) as ProjectSummary[]
+      const safeProjects = (projects ?? []) as ProjectSummary[]
+      const ids = safeProjects.map((p) => p.id)
 
-      // 각 작품의 첫 번째 gallery image 조회
+      // 각 작품의 첫 번째 gallery image 경로만 일괄 조회.
+      // - select: project_id, storage_path 만 (이미지 본문은 가져오지 않음)
+      // - in (project_id, ids) 로 단일 round-trip
+      // - order(sort_order, created_at) 후 첫 행만 reduce 로 추출
       let firstImgByProject: Record<string, string> = {}
-      const ids = projects.map((p) => p.id)
       if (ids.length > 0) {
         const { data: imgs, error: iErr } = await supabase
           .from('project_images')
@@ -93,18 +108,22 @@ export const usePublicProjects = () => {
         }, {})
       }
 
-      list.value = projects.map((p) => ({
+      return safeProjects.map((p) => ({
         ...p,
         fallback_thumbnail_path: firstImgByProject[p.id] ?? null
       }))
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : '작품 목록을 불러오지 못했습니다.'
-      error.value = msg
-      list.value = []
-    } finally {
-      loading.value = false
+    },
+    {
+      // default: 첫 진입 시 list.value 가 null 이지만 skeleton 을 즉시 표시하기 위해 [] 로.
+      default: () => [],
+      server: true
     }
-  }
+  )
+
+  // useAsyncData.error (Error | null) → 외부 노출용 string 으로 변환.
+  const error = computed<string | null>(() =>
+    asyncError.value ? asyncError.value.message : null
+  )
 
   /** 카드의 thumbnail URL */
   const thumbnailUrl = (path: string | null): string | null => {
@@ -112,7 +131,7 @@ export const usePublicProjects = () => {
     return toPublicUrl(supabase, path)
   }
 
-  return { list, loading, error, fetchAll, thumbnailUrl }
+  return { list, loading, error, refresh, thumbnailUrl }
 }
 
 /** 공개 작품 상세 - slug 기반 조회 */

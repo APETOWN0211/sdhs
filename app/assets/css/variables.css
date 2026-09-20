@@ -75,7 +75,7 @@ body {
   scroll-behavior: auto;
 }
 
-/* Lenis smooth scroll */
+/* Lenis smooth scroll (active page 한정) */
 html.lenis,
 html.lenis body {
   height: auto;
@@ -89,9 +89,12 @@ html.lenis body {
   overscroll-behavior: contain;
 }
 
-.lenis.lenis-stopped {
-  overflow: hidden;
-}
+/*
+ * .lenis-stopped 의 overflow:hidden 은 /works 와 모바일에서
+ * native scroll 까지 잠그는 원인이 된다.
+ * → stop 상태에서도 native scroll 이 작동해야 하므로 이 규칙은 제거.
+ *   (wheel/touch listener 는 stop() 호출 시 Lenis 가 내부적으로 해제한다.)
+ */
 
 /* 스크롤바 숨기기 */
 ::-webkit-scrollbar {

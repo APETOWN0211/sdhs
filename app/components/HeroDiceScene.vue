@@ -136,6 +136,71 @@ const DICE_CONFIGS: DiceConfig[] = [
   }
 ]
 
+/*
+ * 모바일(< 768px) 전용 주사위 배치.
+ * - Desktop 의 절대 좌표는 모바일 세로 화면의 좁은 horizontal FOV(~28°) 에서
+ *   화면 밖으로 나가 거의 보이지 않음 (이전 문제 원인).
+ * - mobile 에서는 모든 주사위를 ±3.4 범위 안쪽으로 모으고,
+ *   큰 주사위 2개의 scale 을 줄여 "장식이 콘텐츠를 가리지 않는 선" 에서
+ *   약 30~70% 정도가 보이도록 조정한다.
+ * - Desktop / Tablet 의 DICE_CONFIGS 는 절대 변경하지 않는다.
+ */
+const MOBILE_DICE_CONFIGS: DiceConfig[] = [
+  // A. 좌상단 - 가장 큰 주사위 (모바일에서는 살짝 줄이고 안쪽으로)
+  {
+    id: 'top-left',
+    position: [-3.2, 2.8, 1.5],
+    scale: 1.2,
+    rotation: [deg(22), deg(-22), deg(14)],
+    floatAmp: 0.18,
+    floatSpeed: 0.00045,
+    rotAmp: deg(3),
+    rotSpeed: 0.00035,
+    phase: 0
+  },
+  // B. 좌하단 - 작은 주사위
+  {
+    id: 'bottom-left',
+    position: [-3.0, -2.4, -1.2],
+    scale: 0.85,
+    rotation: [deg(-12), deg(35), deg(-8)],
+    floatAmp: 0.15,
+    floatSpeed: 0.00055,
+    rotAmp: deg(4),
+    rotSpeed: 0.00042,
+    phase: 1.7
+  },
+  // C. 우상단 - 작은 주사위
+  {
+    id: 'top-right',
+    position: [3.0, 2.8, -3.0],
+    scale: 0.7,
+    rotation: [deg(28), deg(-38), deg(18)],
+    floatAmp: 0.12,
+    floatSpeed: 0.0004,
+    rotAmp: deg(3),
+    rotSpeed: 0.0003,
+    phase: 3.1
+  },
+  // D. 우하단 - 큰 주사위 (모바일에서는 줄이고 더 안쪽)
+  {
+    id: 'bottom-right',
+    position: [3.4, -2.5, 0.8],
+    scale: 1.1,
+    rotation: [deg(-20), deg(28), deg(-14)],
+    floatAmp: 0.17,
+    floatSpeed: 0.00048,
+    rotAmp: deg(3.5),
+    rotSpeed: 0.00038,
+    phase: 4.4
+  }
+]
+
+/** 현재 viewport 에서 사용할 dice configs (Desktop / Tablet vs Mobile 분기) */
+const activeDiceConfigs = computed<DiceConfig[]>(() =>
+  isMobileViewport.value ? MOBILE_DICE_CONFIGS : DICE_CONFIGS
+)
+
 function deg(d: number): number {
   return (d * Math.PI) / 180
 }
@@ -175,6 +240,13 @@ interface DiceInstance {
 
 const diceInstances: DiceInstance[] = []
 const disposables: { dispose: () => void }[] = []
+
+/*
+ * dice / pip 머티리얼을 모듈 레벨로 끌어올려 resize 시 dice 를 재구성할 때
+ * 동일 인스턴스를 재사용하도록 한다. (불필요한 GPU 자원 낭비 방지)
+ */
+let sharedDiceMaterial: THREE.MeshPhysicalMaterial | null = null
+let sharedPipMaterial: THREE.MeshStandardMaterial | null = null
 
 const createDice = (config: DiceConfig, diceMaterial: THREE.MeshPhysicalMaterial, pipMaterial: THREE.MeshStandardMaterial): DiceInstance => {
   const group = new THREE.Group()
@@ -293,6 +365,40 @@ const setupShadowPlane = (sceneRef: THREE.Scene): THREE.Group => {
 const updateViewportFlag = () => {
   if (typeof window === 'undefined') return
   isMobileViewport.value = window.innerWidth <= 768
+}
+
+/**
+ * 현재 활성 configs 로 dice 인스턴스를 (재)생성한다.
+ * - Desktop / Tablet 에서는 DICE_CONFIGS, Mobile 에서는 MOBILE_DICE_CONFIGS 사용.
+ * - viewport 전환 시 이전 인스턴스의 geometry / material / mesh 를 모두 dispose 한 뒤
+ *   새로 만들어 scene 에 추가한다.
+ * - scene 이 아직 없으면 (mount 전) 호출되어도 안전.
+ */
+const rebuildDiceInstances = (
+  sceneRef: THREE.Scene | null,
+  diceMaterial: THREE.MeshPhysicalMaterial,
+  pipMaterial: THREE.MeshStandardMaterial
+) => {
+  if (!sceneRef) return
+
+  // 1) 기존 인스턴스 정리
+  for (const inst of diceInstances) {
+    for (const g of inst.geometries) g.dispose()
+    for (const m of inst.materials) m.dispose()
+    sceneRef.remove(inst.group)
+    sceneRef.remove(inst.shadow.mesh)
+    inst.shadow.geom.dispose()
+    inst.shadow.mat.dispose()
+  }
+  diceInstances.length = 0
+
+  // 2) 새 configs 로 다시 생성
+  for (const cfg of activeDiceConfigs.value) {
+    const inst = createDice(cfg, diceMaterial, pipMaterial)
+    inst.shadow = createGroundShadow(sceneRef, cfg)
+    diceInstances.push(inst)
+    sceneRef.add(inst.group)
+  }
 }
 
 const BASE_VFOV = 36 // 데스크탑 가로 화면 기준 vertical FOV
@@ -446,7 +552,7 @@ onMounted(() => {
   setupShadowPlane(scene)
 
   // dice material — 따뜻한 연한 cream, 부드러운 matte (clearcoat 거의 없음)
-  const diceMaterial = new THREE.MeshPhysicalMaterial({
+  sharedDiceMaterial = new THREE.MeshPhysicalMaterial({
     color: 0xfaf6ee,
     roughness: 0.72,
     metalness: 0,
@@ -456,23 +562,30 @@ onMounted(() => {
     sheenColor: new THREE.Color(0xfff4e0),
     sheenRoughness: 0.55
   })
-  disposables.push({ dispose: () => diceMaterial.dispose() })
+  disposables.push({ dispose: () => sharedDiceMaterial?.dispose() })
 
   // pip material — 어두운 부드러운 브라운, matte
-  const pipMaterial = new THREE.MeshStandardMaterial({
+  sharedPipMaterial = new THREE.MeshStandardMaterial({
     color: 0x322521,
     roughness: 0.85,
     metalness: 0
   })
-  disposables.push({ dispose: () => pipMaterial.dispose() })
+  disposables.push({ dispose: () => sharedPipMaterial?.dispose() })
 
-  // 주사위 4개 생성
-  for (const cfg of DICE_CONFIGS) {
-    const inst = createDice(cfg, diceMaterial, pipMaterial)
-    inst.shadow = createGroundShadow(scene!, cfg)
-    diceInstances.push(inst)
-    scene.add(inst.group)
-  }
+  // 주사위 4개 생성 (현재 viewport 에 맞는 config 사용)
+  rebuildDiceInstances(scene!, sharedDiceMaterial, sharedPipMaterial)
+
+  /*
+   * viewport 가 mobile ↔ desktop 경계를 가로지를 때 dice 배치를 다시 만든다.
+   * - handleResize 가 isMobileViewport 만 갱신하고 camera 만 재계산하므로
+   *   dice 좌표/scale 은 수동으로 다시 만들어야 함.
+   * - rebuildDiceInstances 가 이전 인스턴스의 모든 자원을 dispose 한 뒤
+   *   activeDiceConfigs 의 현재 값으로 새로 추가한다.
+   */
+  watch(isMobileViewport, (next) => {
+    if (!scene || !sharedDiceMaterial || !sharedPipMaterial) return
+    rebuildDiceInstances(scene, sharedDiceMaterial, sharedPipMaterial)
+  })
 
   // 이벤트
   resizeHandler = handleResize
@@ -525,6 +638,8 @@ onBeforeUnmount(() => {
 
   diceInstances.length = 0
   disposables.length = 0
+  sharedDiceMaterial = null
+  sharedPipMaterial = null
   renderer = null
   scene = null
   camera = null

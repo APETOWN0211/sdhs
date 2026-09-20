@@ -12,6 +12,32 @@ definePageMeta({
 })
 
 const route = useRoute()
+const router = useRouter()
+
+// "이전으로 돌아가기" 핸들러
+// - history.length 가 충분하면 router.back()
+// - 직접 URL 진입 등으로 history 가 없으면 /projects 로 fallback
+// - SSR 환경에서는 window 가 없으므로 onMounted 이후에만 실제 분기
+const canGoBack = ref(false)
+
+const goBack = () => {
+  if (canGoBack.value) {
+    router.back()
+  } else {
+    router.push('/projects')
+  }
+}
+
+onMounted(() => {
+  // 직접 URL 진입 시 history.length === 1 인 케이스도 있어서
+  // document.referrer 가 같은 origin 이면 안전하게 back 처리
+  if (typeof window !== 'undefined') {
+    const hasHistory = window.history.length > 1
+    const referrer = document.referrer
+    const sameOriginReferrer = !!referrer && new URL(referrer).origin === window.location.origin
+    canGoBack.value = hasHistory && sameOriginReferrer
+  }
+})
 
 // ── 모달 전환 UX: 슬러그가 바뀌면 즉시 이전 작품 잔상을 지우고 오버레이 표시 ──
 // - useState('public-project') 가 글로벌 키라 stale 데이터가 잠깐 보이지 않도록
@@ -87,24 +113,8 @@ const heroThumbUrl = computed<string | null>(() => {
   return null
 })
 
-const heroStyle = computed(() =>
-  heroThumbUrl.value ? { backgroundImage: `url(${heroThumbUrl.value})` } : undefined
-)
-
 /** 갤러리 이미지 (DB 데이터) → resolved list */
 const galleryImages = computed(() => images.value.map((img) => resolveImage(img)))
-
-/** 갤러리 표시:
- *  - 기존 UI 는 hero + row(2개) + hero 구조
- *  - DB 의 첫 번째 이미지를 hero(상단), 그 다음 2개를 row, 그 다음을 두 번째 hero 로 사용
- *  - 이미지가 부족하면 placeholder 배경색만 유지
- */
-const galleryFirstImage = computed(() => galleryImages.value[0] ?? null)
-const galleryRowImages = computed(() => galleryImages.value.slice(1, 3))
-const gallerySecondImage = computed(() => galleryImages.value[3] ?? null)
-
-const imgStyle = (url: string | null | undefined) =>
-  url ? { backgroundImage: `url(${url})` } : undefined
 
 /** 다른작품 카드 thumbnail URL (thumbnail_path 없으면 fallback_thumbnail_path 사용) */
 const otherCardUrl = (p: { thumbnail_path: string | null; fallback_thumbnail_path: string | null }) =>
@@ -135,8 +145,38 @@ useSeoMeta({
 <template>
   <div class="detail">
     <div class="detail__container">
+      <!--
+        뒤로가기 버튼: .detail__sidebar 의 첫 자식으로 이동.
+        - 기존 absolute overlay 방식 → sidebar 자체가 sticky 라 버튼도 자연스럽게 따라옴.
+        - sidebar 가 flex column 이므로 별도 레이아웃 변경 없이 flex flow 에 편입.
+        - sidebar 의 첫 요소로 들어가므로 meta(제목/작가/카테고리) 위에 위치.
+      -->
       <!-- 좌측 sticky 메타 정보 -->
       <aside class="detail__sidebar">
+        <button
+          type="button"
+          class="detail__back"
+          aria-label="이전 페이지로 돌아가기"
+          @click="goBack"
+        >
+          <svg
+            class="detail__back-icon"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path
+              d="M19 12H5M11 18L5 12L11 6"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+          </svg>
+        </button>
+
         <div class="detail__meta">
           <!-- skeleton은 "데이터 아직 안 옴" 일 때만 표시.
                데이터 도착했는데 값이 비어있으면 skeleton 도 안 보임 (요소 자체 미렌더) -->
@@ -195,29 +235,25 @@ useSeoMeta({
         </p>
 
         <template v-else>
-          <div class="detail__hero">
-            <div
+          <!--
+            작품 이미지 표시 방식:
+            - 모든 작품 이미지를 같은 가로 너비로 세로로 나열.
+            - width:100% + height:auto 로 원본 aspect ratio 그대로 노출.
+            - object-fit: contain 으로 crop 없이 전체 표시.
+            - 첫 번째 이미지는 우선 로드, 이후는 lazy.
+          -->
+          <div
+            v-for="(img, i) in galleryImages"
+            :key="img.id ?? i"
+            class="detail__hero"
+          >
+            <img
               class="detail__hero-image"
-              :style="imgStyle(galleryFirstImage?.url) ?? heroStyle"
-            />
-          </div>          <div v-if="galleryRowImages.length > 0" class="detail__row">
-            <div
-              v-for="(img, i) in galleryRowImages"
-              :key="img.id ?? i"
-              class="detail__image detail__image--half"
-              :style="imgStyle(img.url)"
-            />
-            <!-- 이미지가 1개만 있을 때 나머지 1개는 비워둠 -->
-            <div
-              v-if="galleryRowImages.length < 2"
-              class="detail__image detail__image--half detail__image--empty"
-            />
-          </div>
-
-          <div v-if="gallerySecondImage" class="detail__hero">
-            <div
-              class="detail__hero-image"
-              :style="imgStyle(gallerySecondImage.url)"
+              :src="img.url"
+              :alt="project?.title ?? '작품 이미지'"
+              :loading="i === 0 ? 'eager' : 'lazy'"
+              :fetchpriority="i === 0 ? 'high' : 'auto'"
+              decoding="async"
             />
           </div>
         </template>
@@ -276,6 +312,50 @@ useSeoMeta({
   align-items: flex-start;
   justify-content: space-between;
   gap: 40px;
+  /* 뒤로가기 버튼의 absolute positioning 앵커 */
+  position: relative;
+}
+
+/*
+ * "이전으로 돌아가기" — 원형 아이콘 버튼
+ *
+ * - 기존: .detail__container 직속 absolute overlay (스크롤 시 sticky sidebar 와 분리됨).
+ * - 변경: .detail__sidebar 의 첫 자식으로 편입.
+ *   sidebar 자체가 position: sticky + top: var(--header-height) 이므로
+ *   버튼도 자연스럽게 sticky 동작에 따라간다 (스크롤 시 함께 내려옴).
+ * - absolute 위치/top/left/z-index 제거 → flex 흐름 안으로.
+ * - sidebar 의 padding-top 도 같이 줄여 버튼이 너무 아래로 밀리지 않게 한다.
+ */
+.detail__back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin: 0;
+  margin-bottom: 22px;
+
+  background: #ffffff;
+  border: 1.5px solid #000000;
+  border-radius: 50%;
+  color: #000000;
+  cursor: pointer;
+
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.detail__back:hover {
+  background: #000000;
+  color: #ffffff;
+}
+
+.detail__back-icon {
+  display: block;
+  flex-shrink: 0;
 }
 
 /* 좌측 사이드바 (sticky) */
@@ -290,7 +370,15 @@ useSeoMeta({
      min-width: 0 으로 명시적으로 축소 허용 */
   min-width: 0;
   flex-shrink: 0;
-  padding: 70px 0 34px;
+  /*
+   * padding-top: 기존 70px → 36px 로 조정.
+   * - sidebar 안에 .detail__back 버튼이 첫 자식으로 들어왔으므로
+   *   절대 위치로 잡아주던 34px 의 컨테이너 padding 과 시각적으로 비슷한 여백을
+   *   sidebar 자체 padding 으로 처리한다.
+   * - back 버튼의 margin-bottom 22px + sidebar padding-top 36px = 총 58px,
+   *   기존 absolute top:34px 위치(헤더와 34px 간격)와 비슷한 체감 간격.
+   */
+  padding: 36px 0 34px;
   position: sticky;
   top: var(--header-height);
   align-self: flex-start;
@@ -302,15 +390,26 @@ useSeoMeta({
 }
 
 .detail__meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  /*
+   * 작품 헤더 (작품명 | 학생명) — grid 사용.
+   * - minmax(0, 1fr) 로 title 이 grid column 안에 줄바꿈되게 허용
+   *   (h1 의 기본 min-width: auto 는 콘텐츠 폭만큼 column 을 늘리는데
+   *    minmax(0, 1fr) + 자식 min-width:0 으로 차단).
+   * - max-content 로 author 가 자기 글자 폭만큼만 차지해 우측에 고정.
+   * - gap 으로 title 끝과 author 사이 최소 간격 확보.
+   * - white-space: nowrap 제거 — 이 값은 자식 title 에도 전파되어
+   *   줄바꿈을 막는 원인이었음.
+   * - justify-content / flex-wrap 제거 — grid 사용으로 불필요.
+   */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
+  gap: 24px;
   width: 100%;
   padding-bottom: 20px;
   font-family: var(--font-family-base);
   color: var(--color-black);
   line-height: normal;
-  white-space: nowrap;
 }
 
 .detail__title {
@@ -320,6 +419,31 @@ useSeoMeta({
   line-height: normal;
   color: var(--color-black);
   margin: 0;
+  /*
+   * grid item 으로서 1fr 컬럼 안에 머무르게.
+   * - min-width: 0 으로 콘텐츠 폭에 의한 column 확장 차단.
+   * - word-break: keep-all (한글 어절 단위) + overflow-wrap: break-word (영문/혼합).
+   * - line-clamp / text-overflow: ellipsis 사용 안 함 — 상세 페이지 제목은
+   *   정보성이 높으므로 2줄 이상 자유롭게 줄바꿈하고 말줄임 처리하지 않는다.
+   */
+  min-width: 0;
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+.detail__author-wrap {
+  /*
+   * grid item 으로서:
+   * - justify-self: end → 가로축 우측 고정 (기존).
+   * - align-self: center → 세로축 중앙 정렬.
+   *   .detail__meta 자체는 align-items: start 로 제목이 1줄/2줄 모두
+   *   자연스럽게 위쪽에 정렬되도록 두고, 작가명 박스만 meta 의 전체
+   *   높이의 정중앙에 두기 위해 이 요소에만 align-self: center 를 부여.
+   */
+  min-width: 0;
+  justify-self: end;
+  align-self: center;
 }
 
 .detail__author {
@@ -329,6 +453,7 @@ useSeoMeta({
   line-height: normal;
   color: var(--color-black);
   margin: 0;
+  white-space: nowrap;
 }
 
 .detail__category {
@@ -449,34 +574,18 @@ useSeoMeta({
 }
 
 .detail__hero-image {
+  /*
+   * 작품 상세 이미지 — 원본 비율 그대로 표시.
+   * - display: block: inline img 의 baseline 여백 제거.
+   * - width: 100% + height: auto: 원본 aspect ratio 유지.
+   * - object-fit: contain: 어떤 비율(crop 없이)도 잘리지 않고 전체 노출.
+   * - background-color: img 가 로드되기 전 placeholder 시각 안정용 (이미지엔 영향 X).
+   */
+  display: block;
   width: 100%;
-  aspect-ratio: 1230 / 692;
-  background-color: #7b7b7b;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-.detail__row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  width: 1250px;
-  max-width: 100%;
-  gap: 20px;
-}
-
-.detail__image--half {
-  width: 615px;
-  height: 346px;
-  background-color: #7b7b7b;
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-}
-
-.detail__image--empty {
-  background-color: transparent;
+  height: auto;
+  object-fit: contain;
+  background-color: #f5f5f5;
 }
 
 /* 태블릿 */
@@ -495,19 +604,11 @@ useSeoMeta({
   .detail__description p {
     width: 100%;
   }
-
-  .detail__image--half {
-    width: 48%;
-    height: auto;
-    aspect-ratio: 615 / 346;
-  }
 }
 
 /* 태블릿 - 작은 구간
    카드 2열이 너무 좁아져서 1열이 더 보기 좋은 경우만 1열로 전환.
    우선순위: 기존 2열 유지 → 너무 좁으면 1열.
-   912px / sidebar 320px 에서 카드 폭은 약 155px (16:9 → ~87px 높이) 로
-   충분히 보기 좋으므로 2열 유지.
    모바일 (<=768px) 에서만 모바일 레이아웃이 발동되므로
    1열 fallback 도 동일하게 모바일 미디어 쿼리에서 처리. */
 
@@ -518,6 +619,26 @@ useSeoMeta({
     padding: 8px 20px 40px;
     gap: 0;
     justify-content: flex-start;
+  }
+
+  /*
+   * 모바일 뒤로가기 버튼:
+   * - Desktop 에서는 .detail__sidebar 의 첫 자식으로 들어 있어 sticky 따라간다.
+   * - 모바일에서도 sidebar 안 첫 자식이므로 flex column 의 첫 row 로 자연스럽게 표시.
+   *   (container 가 flex column 이 되고 sidebar 도 position:static 이 되므로 sticky 가 해제됨)
+   * - 사이즈는 40x40, 아이콘 18x18 유지 (Desktop 44x44 / 20x20 보다 약간 작게).
+   * - 자체에 약간의 아래 여백을 두어 다음 row(작품명+학생명) 와 시각적으로 분리한다.
+   */
+  .detail__back {
+    width: 40px;
+    height: 40px;
+    margin: 0 0 16px;
+    align-self: flex-start;
+  }
+
+  .detail__back-icon {
+    width: 18px;
+    height: 18px;
   }
 
   .detail__sidebar {
@@ -537,6 +658,19 @@ useSeoMeta({
     padding-top: 16px;
   }
 
+  /*
+   * 모바일 작품 헤더:
+   * - Desktop 에서 .detail__meta 는 grid(2열: title | author).
+   *   같은 grid 를 모바일에도 유지하되 제목이 column 안에서 줄바꿈되게 한다.
+   * - 짧은 제목은 한 줄에 자연스럽게 배치, 긴 제목은 author 가 다음 줄로
+   *   떨어지지 않게 우측에 고정.
+   * - 430px 이하 좁은 모바일은 별도 @media 에서 1열로 분리 (아래 참조).
+   */
+  .detail__meta {
+    gap: 12px;
+    padding-bottom: 0;
+  }
+
   .detail__title {
     font-size: 26px;
   }
@@ -548,12 +682,6 @@ useSeoMeta({
   .detail__category {
     font-size: 16px;
     padding-top: 0;
-  }
-
-  .detail__meta {
-    justify-content: space-between;
-    gap: 12px;
-    padding-bottom: 0;
   }
 
   .detail__description {
@@ -583,18 +711,6 @@ useSeoMeta({
     height: auto;
   }
 
-  .detail__row {
-    flex-direction: column;
-    width: 100%;
-    gap: 12px;
-  }
-
-  .detail__image--half {
-    width: 100%;
-    height: auto;
-    aspect-ratio: 615 / 346;
-  }
-
   .detail__other {
     align-items: flex-start;
     padding-top: 16px;
@@ -612,6 +728,22 @@ useSeoMeta({
 
   .detail__other--mobile {
     display: flex;
+  }
+}
+
+/*
+ * 430px 이하(좁은 모바일 — iPhone SE 375, 13/14 mini 등):
+ * 작품명 + 학생명을 같은 grid column 안에 두면 영문 긴 제목에서 학생명이
+ * 옆으로 밀려 깨질 수 있어 1열로 명시 분리.
+ */
+@media (max-width: 430px) {
+  .detail__meta {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .detail__author-wrap {
+    justify-self: start;
   }
 }
 
