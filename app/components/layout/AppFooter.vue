@@ -231,7 +231,13 @@ const committeeMembers = [
 /* 모바일 반응형 */
 @media (max-width: 768px) {
   .footer {
-    padding: var(--footer-padding-y-mobile) var(--footer-padding-x-mobile);
+    /*
+     * 모바일 footer padding:
+     * - 상단 28px (header 다음 콘텐츠와 충분한 간격)
+     * - 좌우 20px (콘텐츠를 화면 끝에서 보호, full-bleed 배경 유지)
+     * - 하단 32px (footer 안쪽 콘텐츠와 footer 끝 여백)
+     */
+    padding: 28px 20px 32px;
   }
 
   .footer__container {
@@ -239,10 +245,17 @@ const committeeMembers = [
   }
 
   .footer__mobile {
+    /*
+     * 모바일 footer contents wrapper.
+     * - background 자체는 .footer 가 width:100% 로 화면 끝까지 차지 → 그대로 유지.
+     * - .footer 자체 padding 으로 이미 좌우 20px 가 들어가므로 wrapper 는
+     *   별도 padding 없이 max-width:100% 로 부모 padding 안의 콘텐츠만 사용.
+     */
     display: flex;
     flex-direction: column;
     gap: 8px;
     max-width: var(--container-max-width);
+    width: 100%;
     margin: 0 auto;
   }
 

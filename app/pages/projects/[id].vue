@@ -52,12 +52,25 @@ const {
   thumbnailUrl,
   resolveImage
 } = usePublicProject()
-const otherProjects = useOtherProjects(computed(() => project.value?.id ?? null), 2)
+const otherProjects = useOtherProjectsSequential(computed(() => project.value?.id ?? null), 2)
+
+/**
+ * 다른작품 명시 fetch:
+ * - useOtherProjectsSequential 의 watch 가 reactive deps 추적에서
+ *   일부 케이스 (SSR hydrate 직후, useState 값이 sync 로 들어오는 경우) 에
+ *   trigger 되지 않는 문제를 우회하기 위해 fetch 를 명시적으로 호출한다.
+ * - project.value 가 설정된 직후 / slug 가 바뀐 직후 모두 안전하게 동작.
+ */
+const otherProjectsRefetch = async () => {
+  if (project.value?.id) {
+    await otherProjects.fetch()
+  }
+}
 
 const slug = computed(() => route.params.id as string)
 
 // 슬러그 변경 → 즉시 stale 비우기 → 새 fetch 시작
-// (오버레이 표시 트리거는 switchingFlag 가 담당)
+// (오버레이 표시 트리거가 switchingFlag 가 담당)
 const switchingFlag = ref(false)
 
 const loadAll = async () => {
@@ -66,6 +79,9 @@ const loadAll = async () => {
   project.value = null
   images.value = []
   await fetchBySlug(slug.value)
+  // 작품 fetch 완료 후 다른작품도 명시적으로 fetch.
+  // → useState 기반 reactive deps 추적에 의존하지 않고 동기적으로 보장.
+  await otherProjectsRefetch()
   switchingFlag.value = false
 }
 
@@ -93,13 +109,41 @@ const hasText = (field: 'title' | 'student_name' | 'category' | 'description'): 
  *   id/slug 가 없는 원소가 섞여 들어와도 template 가 깨지지 않도록 방어.
  */
 const safeOtherProjects = computed(() => {
-  const raw = otherProjects.list
+  // otherProjects.list 는 Ref<OtherProjectSummary[]> 이므로 .value 로 접근해야 array 가 나온다.
+  // (template 에서는 자동 unwrap 되지만 script 에서 직접 접근할 때는 .value 가 필요)
+  const raw = otherProjects.list.value
   if (!Array.isArray(raw)) return []
-  return raw.filter(
-    (p): p is { id: string; slug: string; thumbnail_path: string | null; fallback_thumbnail_path: string | null } =>
-      !!p && typeof p === 'object' && typeof (p as { id?: unknown }).id === 'string' && typeof (p as { slug?: unknown }).slug === 'string'
-  )
+  return raw as Array<{ id: string; slug: string; title: string; student_name: string; thumbnail_path: string | null; fallback_thumbnail_path: string | null }>
 })
+
+// 디버그: 다른작품 상태 추적
+if (import.meta.client) {
+  // 원본 list 까지 추적해서 filter 에서 뭐가 빠지는지 진단
+  watch(
+    () => otherProjects.list.value,
+    (raw) => {
+      const isArr = Array.isArray(raw)
+      // eslint-disable-next-line no-console
+      console.log('[detail] otherProjects.list isArray:', isArr, 'length:', isArr ? (raw as unknown[]).length : 'N/A')
+      if (isArr) {
+        ;(raw as unknown[]).forEach((p, i) => {
+          // eslint-disable-next-line no-console
+          console.log(`  [${i}]`, p, 'typeof id:', typeof (p as { id?: unknown })?.id, 'typeof slug:', typeof (p as { slug?: unknown })?.slug)
+        })
+      }
+    },
+    { immediate: true, deep: true }
+  )
+
+  watch(
+    safeOtherProjects,
+    (next) => {
+      // eslint-disable-next-line no-console
+      console.log('[detail] safeOtherProjects count:', next.length, next.map(p => ({ id: p.id, slug: p.slug, title: p.title })))
+    },
+    { immediate: true }
+  )
+}
 
 /** 작품 thumbnail URL (thumbnail_path 없으면 첫 번째 이미지로 fallback) */
 const heroThumbUrl = computed<string | null>(() => {
@@ -194,6 +238,14 @@ useSeoMeta({
         </div>
         <div v-else-if="isHydrating" class="detail__category-skel" aria-hidden="true" />
 
+        <!--
+          다른작품 영역은 sidebar 가 아닌 메인 컬럼(.detail__gallery) 안으로 옮겼다.
+          - 데스크톱에서 sidebar 안에 두면 가로폭이 좁아져 카드 정보(제목/학생명)가
+            시각적으로 답답해진다.
+          - 새 카드는 "썸네일 + 작품명 + 학생이름" 이 들어가야 하므로
+            메인 컬럼의 다른작품 영역(데스크톱/모바일 공통)을 사용한다.
+        -->
+
         <div v-if="hasText('description')" class="detail__description">
           <!-- description 이 있을 때만 줄 단위로 표시.
                비어있으면 아예 영역을 그리지 않음 (이전 작품/기본 문구 잔상 차단) -->
@@ -204,25 +256,6 @@ useSeoMeta({
             {{ line }}
           </p>
         </div>
-
-        <!-- 다른작품 (데스크톱용, 사이드바 안) -->
-        <section class="detail__other detail__other--desktop">
-          <h2 class="detail__other-title">다른작품</h2>
-          <div class="detail__other-list">
-            <a
-              v-for="other in safeOtherProjects"
-              :key="other.id"
-              :href="`/projects/${other.slug}`"
-              class="detail__other-item"
-              @click="(e) => onOtherClick(e, other.slug)"
-            >
-              <div
-                class="detail__other-thumb"
-                :style="otherCardStyle(other)"
-              />
-            </a>
-          </div>
-        </section>
       </aside>
 
       <!-- 우측 이미지 갤러리 -->
@@ -257,27 +290,38 @@ useSeoMeta({
             />
           </div>
         </template>
-
-        <!-- 다른작품 (모바일용, 갤러리 맨 아래) -->
-        <section class="detail__other detail__other--mobile">
-          <h2 class="detail__other-title">다른작품</h2>
-          <div class="detail__other-list">
-            <a
-              v-for="other in safeOtherProjects"
-              :key="other.id"
-              :href="`/projects/${other.slug}`"
-              class="detail__other-item"
-              @click="(e) => onOtherClick(e, other.slug)"
-            >
-              <div
-                class="detail__other-thumb"
-                :style="otherCardStyle(other)"
-              />
-            </a>
-          </div>
-        </section>
       </section>
     </div>
+
+    <!--
+      다른작품 (데스크톱/모바일 공통, 페이지 하단 풀폭 section)
+      - 기존: 갤러리(작품 사진) 맨 아래에 위치했음.
+        → 데스크톱에서 sidebar 가 sticky 인 상태로 다른작품이 보이면
+          sidebar 의 description 과 gallery 의 다른작품이 시각적으로 어긋남.
+      - 변경: .detail__container 바깥, 페이지 하단에 별도 section 으로 분리.
+        → 데스크톱에서는 [sidebar | gallery] row 가 끝난 다음 페이지 끝에
+          다른작품이 전체 폭으로 표시. sidebar 의 description 다음 흐름과 동일.
+        → 모바일에서도 column 흐름에서 자연스럽게 페이지 끝에 표시.
+      - 카드 구성: 썸네일 + 작품명 (제목만, 학생이름 제거).
+    -->
+    <section class="detail__other">
+      <h2 class="detail__other-title">다른작품</h2>
+      <div class="detail__other-list">
+        <a
+          v-for="other in safeOtherProjects"
+          :key="other.id"
+          :href="`/projects/${other.slug}`"
+          class="detail__other-card"
+          @click="(e) => onOtherClick(e, other.slug)"
+        >
+          <div
+            class="detail__other-thumb"
+            :style="otherCardStyle(other)"
+          />
+          <h3 class="detail__other-card-title">{{ other.title }}</h3>
+        </a>
+      </div>
+    </section>
 
     <!-- 모달식 전환 오버레이:
          - 작품 -> 작품 이동 시 / 초기 진입 시 표시
@@ -391,20 +435,26 @@ useSeoMeta({
 
 .detail__meta {
   /*
-   * 작품 헤더 (작품명 | 학생명) — grid 사용.
-   * - minmax(0, 1fr) 로 title 이 grid column 안에 줄바꿈되게 허용
-   *   (h1 의 기본 min-width: auto 는 콘텐츠 폭만큼 column 을 늘리는데
-   *    minmax(0, 1fr) + 자식 min-width:0 으로 차단).
-   * - max-content 로 author 가 자기 글자 폭만큼만 차지해 우측에 고정.
-   * - gap 으로 title 끝과 author 사이 최소 간격 확보.
-   * - white-space: nowrap 제거 — 이 값은 자식 title 에도 전파되어
-   *   줄바꿈을 막는 원인이었음.
-   * - justify-content / flex-wrap 제거 — grid 사용으로 불필요.
+   * 작품 헤더 (작품명 + 학생명) — PC 에서는 flex row, 모바일에서는 column.
+   *
+   * PC(row) 동작:
+   *   - 짧은 제목 → 제목 | 이름 이 한 줄에 나란히 배치.
+   *   - 긴 제목  → 제목이 2~3 줄로 자연스럽게 줄바꿈,
+   *               flex:1 + min-width:0 으로 제목 영역이 남는 폭을 다 쓰고,
+   *               이름(.detail__author-wrap) 은 우측 상단에 고정.
+   *   - align-items: flex-start → 제목이 여러 줄일 때 이름이 첫 줄
+   *     baseline 에 끌려 올라가는 어색함 제거.
+   *
+   * 모바일(column) 동작:
+   *   - 모바일 폭(320~480px) 에서는 제목이 2줄 이상이 되는 경우가 많고,
+   *     한 줄에 제목 + 이름을 억지로 같이 두면 제목 폭이 너무 작아진다.
+   *   - 모바일 미디어쿼리에서 flex-direction 을 column 으로 바꾸고
+   *     이름은 다음 줄로 자연스럽게 떨어지게 한다.
    */
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) max-content;
-  align-items: start;
-  gap: 24px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
   width: 100%;
   padding-bottom: 20px;
   font-family: var(--font-family-base);
@@ -416,34 +466,39 @@ useSeoMeta({
   font-family: var(--font-family-base);
   font-size: 36px;
   font-weight: var(--font-weight-bold);
-  line-height: normal;
+  /*
+   * 상세 페이지 작품명은 전체 표시가 원칙.
+   * - nowrap/ellipsis 제거 → 최대 2~3줄 자연 줄바꿈.
+   * - word-break: keep-all (한글 어절 단위 유지)
+   * - overflow-wrap: break-word (영문/혼합 시 단어 중간 끊김 방지)
+   * - line-height: 1.25 → 여러 줄일 때 행간 안정.
+   */
+  line-height: 1.25;
   color: var(--color-black);
   margin: 0;
-  /*
-   * grid item 으로서 1fr 컬럼 안에 머무르게.
-   * - min-width: 0 으로 콘텐츠 폭에 의한 column 확장 차단.
-   * - word-break: keep-all (한글 어절 단위) + overflow-wrap: break-word (영문/혼합).
-   * - line-clamp / text-overflow: ellipsis 사용 안 함 — 상세 페이지 제목은
-   *   정보성이 높으므로 2줄 이상 자유롭게 줄바꿈하고 말줄임 처리하지 않는다.
-   */
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
   word-break: keep-all;
   overflow-wrap: break-word;
 }
 
 .detail__author-wrap {
   /*
-   * grid item 으로서:
-   * - justify-self: end → 가로축 우측 고정 (기존).
-   * - align-self: center → 세로축 중앙 정렬.
-   *   .detail__meta 자체는 align-items: start 로 제목이 1줄/2줄 모두
-   *   자연스럽게 위쪽에 정렬되도록 두고, 작가명 박스만 meta 의 전체
-   *   높이의 정중앙에 두기 위해 이 요소에만 align-self: center 를 부여.
+   * flex item 으로서:
+   * - flex: 0 0 auto (flex-shrink: 0 효과) → 학생 이름이 절대 줄바꿈되거나 줄어들지 않음.
+   *   이름이 절대 다음 줄로 내려가지 않도록 보장.
+   - margin-left: auto → 같은 줄 우측 끝으로 밀어붙임.
+   - padding-top: 4px → 제목 첫 줄 baseline 근처로 시각적으로 정렬.
+     (align-items: flex-start 로 제목이 위쪽부터 시작하므로 약간의 상단 보정)
    */
+  flex: 0 0 auto;
   min-width: 0;
-  justify-self: end;
-  align-self: center;
+  margin-left: auto;
+  padding-top: 4px;
 }
 
 .detail__author {
@@ -500,15 +555,26 @@ useSeoMeta({
   color: #c0392b;
 }
 
+/*
+ * 다른작품 영역 (데스크톱/모바일 공통, 페이지 하단 풀폭 section)
+ * - 기존: .detail__gallery 내부에 들어가 있어서 max-width 가 gallery 의 1250px에 제한됨.
+ * - 변경: .detail__container 바깥 페이지 하단 풀폭 section 으로 분리.
+ *   → 데스크톱에서 [sidebar | gallery] row 가 끝난 다음 페이지 끝에
+ *     다른작품이 전체 폭으로 표시.
+ *   → 모바일 column 흐름에서도 페이지 끝에 자연스럽게 표시.
+ * - 페이지 컨테이너(.detail__container) 와 동일한 max-width / padding 사용으로
+ *   가로 정렬 통일.
+ */
 .detail__other {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding-top: 40px;
+  /* 페이지 컨테이너와 동일한 좌우 padding + 동일한 max-width 로 통일 */
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 72px 64px 80px;
   width: 100%;
-  /* flex/grid item 내부 콘텐츠가 부모보다 커져도
-     sidebar 자체는 부모 너비에 맞춰 줄어들도록 허용 */
   min-width: 0;
 }
 
@@ -520,42 +586,90 @@ useSeoMeta({
   color: var(--color-black);
   margin: 0;
   white-space: nowrap;
+  /*
+   * 제목과 카드 사이 간격 16~20px → 18px.
+   * flex column + margin-bottom 으로 자연스럽게 분리.
+   */
+  margin-bottom: 18px;
 }
 
-/* 카드 2개를 항상 부모 컬럼 폭에 맞춰 fluid하게 배치
-   - 고정 px width 사용 X
-   - grid item의 minmax(0, 1fr)로 인해 min-content까지 줄어들 수 있도록
-   - 부모(.detail__sidebar)에 min-width: 0을 함께 줘야 효과 발생 */
+/*
+ * 카드 그리드:
+ * - 항상 repeat(2, minmax(0, 1fr)) — 모바일/태블릿/데스크톱 모두 2열.
+ * - 페이지 하단 풀폭 section 이므로 max-width 640px 제한을 풀고
+ *   카드들이 컨테이너 폭을 충분히 활용하도록 한다.
+ *   → 갤러리 안에 있을 때는 sidebar 390px + gallery 1250px 안에서
+ *     거대화 방지를 위해 640px 로 제한했었음.
+ *   → 이제는 풀폭이므로 제한 없음.
+ * - gap: 20px (PC).
+ */
 .detail__other-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  gap: 20px;
   align-items: flex-start;
-  padding: 20px 0;
+  justify-items: stretch;
+  padding: 0;
   width: 100%;
   min-width: 0;
 }
 
-.detail__other-item {
-  display: block;
+/*
+ * 카드 (썸네일 + 작품명 + 학생이름)
+ * - 카드 전체가 클릭 영역. <a> 이므로 클릭 시 navigate.
+ * - hover 시 카드 자체가 살짝 떠오르고, 이미지가 약간 확대.
+ */
+.detail__other-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   width: 100%;
   min-width: 0;
-  aspect-ratio: 16 / 9;
   text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: transform 0.25s ease-in-out;
+}
+
+.detail__other-card:hover {
+  transform: translateY(-3px);
 }
 
 .detail__other-thumb {
   width: 100%;
-  height: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
   background-color: #d3d3d3;
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  transition: transform 0.2s ease-in-out;
+  transition: transform 0.25s ease-in-out;
+  border-radius: 4px;
+  /*
+   * 안전망: 일부 브라우저(특히 Safari) 에서 flex item + aspect-ratio 가
+   * height: 0 으로 collapse 되는 케이스가 있어, 명시적으로 display: block 부여.
+   * - grid item 인 thumb 가 어떤 이유로 0 height 로 보이지 않는 문제 차단.
+   */
+  display: block;
 }
 
-.detail__other-item:hover .detail__other-thumb {
+.detail__other-card:hover .detail__other-thumb {
   transform: scale(1.03);
+}
+
+.detail__other-card-title {
+  font-family: var(--font-family-base);
+  font-size: 18px;
+  font-weight: var(--font-weight-semi-bold);
+  line-height: 1.3;
+  color: var(--color-black);
+  margin: 0;
+  min-width: 0;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: keep-all;
 }
 
 /* 우측 갤러리 */
@@ -658,21 +772,37 @@ useSeoMeta({
     padding-top: 16px;
   }
 
-  /*
-   * 모바일 작품 헤더:
-   * - Desktop 에서 .detail__meta 는 grid(2열: title | author).
-   *   같은 grid 를 모바일에도 유지하되 제목이 column 안에서 줄바꿈되게 한다.
-   * - 짧은 제목은 한 줄에 자연스럽게 배치, 긴 제목은 author 가 다음 줄로
-   *   떨어지지 않게 우측에 고정.
-   * - 430px 이하 좁은 모바일은 별도 @media 에서 1열로 분리 (아래 참조).
-   */
-  .detail__meta {
-    gap: 12px;
-    padding-bottom: 0;
-  }
+/*
+ * 모바일 작품 헤더:
+ * - PC 와 동일한 row 구조 유지 (제목 | 이름 한 줄 나란히).
+ * - 제목이 2줄 이상으로 줄바꿈되어도 이름은 우측 상단에 고정.
+ * - 모바일 폭이 좁으므로 제목이 자연스럽게 1~3줄로 표시되고,
+ *   이름은 .detail__author-wrap 의 nowrap 으로 절대 줄바꿈 안 됨.
+ * - 제목이 짧으면 한 줄에 제목 + 이름이 같이 표시됨.
+ */
+.detail__meta {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 16px;
+}
 
   .detail__title {
     font-size: 26px;
+    line-height: 1.3;
+    /* 모바일 row 구조에서 제목은 컨테이너 폭에서 이름 폭을 뺀 만큼 차지 */
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+  }
+
+  .detail__author-wrap {
+    /* PC 와 동일: 우측 상단 고정, 절대 줄바꿈 안 됨 */
+    margin-left: auto;
+    padding-top: 4px;
+    align-self: flex-start;
+    flex: 0 0 auto;
   }
 
   .detail__author {
@@ -700,57 +830,33 @@ useSeoMeta({
     margin-top: 10px;
   }
 
+  .detail__other {
+    /*
+     * 모바일 다른작품 영역 (페이지 하단 풀폭):
+     * - PC 와 동일한 풀폭 section 이지만 모바일에서는
+     *   좌우 padding 을 20px 로 줄여 콘텐츠 폭을 확보한다.
+     * - title → 카드 그리드 사이 padding-top 56px.
+     * - 카드 영역 아래 footer 까지 48~64px 여백 → 56px (padding-bottom).
+     */
+    padding: 56px 20px;
+  }
+
   .detail__other-title {
     font-size: 18px;
+    margin-bottom: 14px;
   }
 
-  .detail__other-item {
-    /* 모바일: sidebar 가 width: 100% 이므로 카드도 fluid 하게 50% 차지.
-       height 는 aspect-ratio 가 고정해주므로 별도 height 지정 불필요 */
-    width: 100%;
-    height: auto;
-  }
-
-  .detail__other {
-    align-items: flex-start;
-    padding-top: 16px;
-  }
-
+  /*
+   * 모바일 카드 그리드:
+   * - 항상 2열. repeat(2, minmax(0, 1fr)) 로 nowrap 텍스트가 column 을 늘리지 못하게.
+   * - gap: 12px (PC 의 20px 보다 좁음 → 작은 카드 느낌).
+   */
   .detail__other-list {
-    justify-content: flex-start;
-    padding: 10px 0 0;
-    gap: 8px;
+    gap: 12px;
   }
 
-  .detail__other--desktop {
-    display: none;
-  }
-
-  .detail__other--mobile {
-    display: flex;
-  }
-}
-
-/*
- * 430px 이하(좁은 모바일 — iPhone SE 375, 13/14 mini 등):
- * 작품명 + 학생명을 같은 grid column 안에 두면 영문 긴 제목에서 학생명이
- * 옆으로 밀려 깨질 수 있어 1열로 명시 분리.
- */
-@media (max-width: 430px) {
-  .detail__meta {
-    grid-template-columns: 1fr;
-    gap: 8px;
-  }
-
-  .detail__author-wrap {
-    justify-self: start;
-  }
-}
-
-/* 데스크톱에서 모바일용 다른작품 숨김 */
-@media (min-width: 769px) {
-  .detail__other--mobile {
-    display: none;
+  .detail__other-card-title {
+    font-size: 14px;
   }
 }
 

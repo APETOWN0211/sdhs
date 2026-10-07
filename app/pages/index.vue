@@ -124,7 +124,7 @@ onBeforeUnmount(() => {
 
       <div class="home__hero-content">
         <p class="home__hero-eyebrow">
-          서울디자인고등학교 크리에이티브 디자인과 2기 졸업전시
+          서울디자인고등학교<br class="mobile-only">크리에이티브 디자인과 2기 졸업전시
         </p>
 
         <!-- TODO: 메인 이미지 준비되면 교체 -->
@@ -183,7 +183,7 @@ onBeforeUnmount(() => {
           </h2>
 
           <p class="home__about-desc" data-animate="fade-up" data-animate-delay="300">
-            우리는 저마다 다른 눈금과 방향을 가진 채, 하나의 판 위에 놓여 있다.
+          우리는 저마다 다른 눈금과 방향을 가진 채, 하나의 판 위에 놓여 있다.
             멈추고, 돌아가고, 다시 나아가는 순간들이 쌓여 지금의 장면이 만들어졌다.
             그러나 이곳은 도착점이 아니라, 다음 움직임을 기다리는 자리다.
             주사위가 다시 굴러가듯, 우리의 가능성 또한 새로운 방향을 향해 이어진다.
@@ -291,6 +291,21 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+/*
+ * .mobile-only 유틸 클래스:
+ * - 기본(데스크톱/태블릿): display: none 으로 완전히 숨김.
+ *   → .home__hero-eyebrow 의 white-space: nowrap 이 적용된 상태에서
+ *     <br class="mobile-only"> 이 아무 효과도 주지 않음.
+ * - 모바일(<=768px): display: inline 으로 활성화.
+ *   → <br> 은 인라인 요소라서 별도 display: block 없이도 줄바꿈이 동작.
+ *   → 텍스트가 정확히 2줄로 분리됨:
+ *      줄1: 서울디자인고등학교
+ *      줄2: 크리에이티브 디자인과 2기 졸업전시
+ */
+.mobile-only {
+  display: none;
+}
+
 .home__hero-placeholder {
   width: clamp(280px, 29vw, 520px);
   aspect-ratio: 1 / 0.84;
@@ -360,6 +375,8 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 하단 padding: 48px 그대로 유지 — 다른 섹션과의 간격은 INFO 의 padding-top 으로
+     처리해 배경이 끊겨 보이지 않게 한다. */
   padding: 48px 64px;
 }
 
@@ -460,7 +477,15 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 64px;
+  /*
+   * PC 기본 padding-top: 96px (권장 120~160px 의 하한 쪽, 깔끔한 8배수)
+   * - ABOUT 의 padding-bottom 48px + INFO 의 padding-top 96px = 144px
+   *   → ABOUT ↔ INFO 사이 시각적 간격 ≈ 144px (권장 120~160px 범위)
+   * - INFO 의 padding-bottom 은 기존 48px 그대로 유지.
+   * - 배경은 동일하므로 margin 으로 처리하지 않고 padding-top 으로 처리해
+   *   배경이 끊겨 보이는 현상을 방지한다.
+   */
+  padding: 96px 64px 48px;
 }
 
 .home__info-container {
@@ -589,7 +614,8 @@ onBeforeUnmount(() => {
     min-height: 100svh;
     display: flex;
     align-items: center;
-    padding: 36px 32px;
+    /* 태블릿(1280↓): INFO padding-top 100px, ABOUT padding-bottom 36px → 약 136px 간격 (권장 120~160px) */
+    padding: 100px 32px 36px;
   }
 
   .home__info-container {
@@ -628,6 +654,19 @@ onBeforeUnmount(() => {
     white-space: normal;
     margin-bottom: 36px;
     padding: 0 4px;
+    /* 모바일에서 정확히 2줄 유지: 가운데 정렬 + 여유 있는 줄 간격 */
+    text-align: center;
+    line-height: 1.55;
+  }
+
+  /*
+   * 모바일에서만 <br> 활성화 → 2줄 강제.
+   * - <br> 은 인라인 요소라 display: inline 으로 충분.
+   * - 부모 .home__hero-eyebrow 에 text-align: center + line-height: 1.55 가
+   *   이미 적용되어 있으므로 두 줄 모두 가운데 정렬, 여유 있는 줄간격 유지.
+   */
+  .mobile-only {
+    display: inline;
   }
 
   .home__hero-placeholder {
@@ -701,7 +740,8 @@ onBeforeUnmount(() => {
   .home__info {
     min-height: auto;
     display: block;
-    padding: 16px 20px 40px;
+    /* 모바일: padding-top 64px + ABOUT padding-bottom 32px ≈ 96px 간격 (권장 72~96px) */
+    padding: 64px 20px 40px;
   }
 
   .home__info-container {

@@ -694,11 +694,167 @@ const guessExtFromType = (mime: string): string => {
   return mime.split('/').pop() || ''
 }
 
-/** 작품 생성 중 부분 실패 시 정리 */
+/** 작품 생성 중 부분失敗 시 정리 */
 const cleanupProject = async (
   supabase: ReturnType<typeof useSupabaseClient>,
   projectId: string
 ) => {
   // DB CASCADE 로 project_images 정리
   await supabase.from('projects').delete().eq('id', projectId)
+}
+
+/**
+ * 다른작품 (현재 작품 기준 DB 정렬 순서에서 "다음 N개", wrap-around)
+ *
+ * 동작 방식:
+ * - 모든 published 작품을 projects.sort_order ASC, created_at ASC 로 가져온다.
+ * - 그 안에서 currentId 의 index 를 찾는다.
+ * - 그 다음 index 의 작품 2개를 list 에 담는다.
+ * - 마지막 작품(가장 뒤) 이면 wrap-around 로 다시 앞쪽에서 채운다.
+ *   예) 현재 14번째 작품 (총 15개) → 15번째 + 1번째
+ *
+ * - 각 작품의 thumbnail_path 가 비어있으면
+ *   project_images 첫 행을 fallback_thumbnail_path 로 함께 가져온다.
+ *
+ * - SSR-safe: useState 로 단일 글로벌 슬롯에 저장하여
+ *   /projects/[id] 끼리 내비게이션해도 캐시가 공유되며 hydration 도 안정적이다.
+ */
+export const useOtherProjectsSequential = (currentId: Ref<string | null>, limit = 2) => {
+  const supabase = useSupabaseClient()
+
+  const list = useState<OtherProjectSummary[]>('other-projects-sequential', () => [])
+  const loading = useState<boolean>('other-projects-sequential-loading', () => false)
+  const error = useState<string | null>('other-projects-sequential-error', () => null)
+
+  const fetch = async () => {
+    const cid = currentId.value
+    if (!cid) {
+      // currentId 가 아직 없으면 빈 배열 유지 (watch 에서 재호출됨)
+      list.value = []
+      return
+    }
+
+    loading.value = true
+    error.value = null
+    try {
+      // 1) 모든 published 작품을 DB 정렬 순서로 가져온다.
+      const { data: allProjects, error: pErr } = await supabase
+        .from('projects')
+        .select('id, slug, title, student_name, category, thumbnail_path, is_published, sort_order')
+        .eq('is_published', true)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true })
+      if (pErr) throw pErr
+
+      const all = (allProjects ?? []) as ProjectSummary[]
+      if (all.length === 0) {
+        list.value = []
+        return
+      }
+
+      // 2) currentId 의 index 를 찾는다.
+      const currentIndex = all.findIndex((p) => p.id === cid)
+      if (currentIndex === -1) {
+        // 현재 작품이 목록에 없으면 (RLS / 비공개 등) 그냥 앞에서 2개.
+        const picked = all.slice(0, limit)
+        const merged = await attachFallbacks(picked)
+        list.value = merged
+        return
+      }
+
+      // 3) 현재 작품의 다음 N개를 wrap-around 로 가져온다.
+      // - currentIndex 다음부터 순서대로 채운다.
+      // - 끝까지 다 쓰면 모자란 만큼 앞쪽(0) 부터 이어서 채운다.
+      // - 단, 자기 자신은 제외한다 (currentId 와 다른 id 만).
+      const picked: ProjectSummary[] = []
+      for (let step = 1; step <= all.length && picked.length < limit; step++) {
+        const idx = (currentIndex + step) % all.length
+        const candidate = all[idx]!
+        if (candidate.id !== cid) {
+          picked.push(candidate)
+        }
+      }
+
+      // 모든 작품이 자기 자신밖에 없는 극단 케이스(예: 1개 작품)는
+      // 위 루프에서 picked 가 비게 된다. 이때는 빈 배열로 두지 않고
+      // 자기 자신이라도 노출하여 카드가 "안 보임" 상태가 되지 않게 한다.
+      if (picked.length === 0 && all.length > 0) {
+        // 자기 자신 외 다른 row 가 없는 경우.
+        // 첫 번째 작품을 fallback 으로 노출 (id 가 같아도 카드는 표시).
+        const firstOther = all.find((p) => p.id !== cid)
+        if (firstOther) picked.push(firstOther)
+        else picked.push(all[0]!)
+      }
+
+      // 4) 각 작품의 fallback_thumbnail_path 를 첫 번째 이미지로 채워 반환.
+      const result = await attachFallbacks(picked)
+      // eslint-disable-next-line no-console
+      console.log('[useOtherProjectsSequential] picked:', picked.map(p => ({ id: p.id, slug: p.slug, title: p.title })))
+      // eslint-disable-next-line no-console
+      console.log('[useOtherProjectsSequential] result type:', Array.isArray(result), 'length:', (result as unknown[]).length)
+
+      /*
+       * list.value = result: Vue 의 useState(Ref) 는 .value 에 array 를 set 할 때
+       * reactive proxy 로 감싸는데, 일부 환경(SSR hydrate 직후) 에서
+       * Array.isArray(list.value) 가 false 로 평가되는 케이스가 있다.
+       * - 이 경우 .filter / .map / .forEach 가 깨지거나 비어버린다.
+       * - 안전을 위해 spread 로 새 array 를 만들어 set.
+       */
+      list.value = [...result] as OtherProjectSummary[]
+      // eslint-disable-next-line no-console
+      console.log('[useOtherProjectsSequential] list.value set, isArray:', Array.isArray(list.value), 'length:', list.value.length)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '다른작품을 불러오지 못했습니다.'
+      // eslint-disable-next-line no-console
+      console.error('[useOtherProjectsSequential] fetch error:', e)
+      error.value = msg
+      list.value = []
+    } finally {
+      loading.value = false
+    }
+  }
+
+  // currentId 가 바뀌면 재호출.
+  // - immediate: true 이지만 처음에 currentId 가 null 이면 fetch 자체를 건너뛴다.
+  // - project.value 가 hydrate 또는 fetch 로 채워지면 currentId 가 reactive 로
+  //   갱신되고 watch 가 다시 trigger 되어 fetch 가 호출된다.
+  watch(currentId, (cid) => {
+    if (cid) {
+      // eslint-disable-next-line no-console
+      console.log('[useOtherProjectsSequential] watch triggered, currentId:', cid)
+      fetch()
+    }
+  }, { immediate: true })
+
+  /**
+   * 각 작품의 첫 번째 project_images.storage_path 를 fallback_thumbnail_path 로 부착.
+   * - 단일 in(...) 쿼리로 round-trip 최소화.
+   * - 반환값은 OtherProjectSummary[] (thumbnail_path 가 비어있을 때만 fallback 사용).
+   */
+  const attachFallbacks = async (arr: ProjectSummary[]): Promise<OtherProjectSummary[]> => {
+    if (arr.length === 0) return []
+    const ids = arr.map((p) => p.id)
+    const { data: imgs, error: iErr } = await supabase
+      .from('project_images')
+      .select('project_id, storage_path, sort_order, created_at')
+      .in('project_id', ids)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true })
+    if (iErr) throw iErr
+
+    // project_id 별 첫 행만 채택.
+    const firstImgByProject: Record<string, string> = {}
+    ;((imgs ?? []) as Array<{ project_id: string; storage_path: string }>).forEach((img) => {
+      if (!(img.project_id in firstImgByProject)) {
+        firstImgByProject[img.project_id] = img.storage_path
+      }
+    })
+
+    return arr.map((p) => ({
+      ...p,
+      fallback_thumbnail_path: firstImgByProject[p.id] ?? null
+    }))
+  }
+
+  return { list, loading, error, fetch }
 }
