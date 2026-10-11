@@ -221,7 +221,7 @@ onBeforeUnmount(() => {
 
           <div class="home__info-group" data-animate="fade-up" data-animate-delay="200">
             <span class="home__info-label">위치</span>
-            <span class="home__info-value">서울특별시 마포구 백범로 139</span>
+            <span class="home__info-value">서울특별시 마포구 백범로 139<br>C동 2층 탈의실</span>
           </div>
         </div>
 
