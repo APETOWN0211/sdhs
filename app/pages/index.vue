@@ -296,8 +296,13 @@ onBeforeUnmount(() => {
 }
 
 .home__hero-placeholder {
+  width: min(100%, 420px);
+  aspect-ratio: 1 / 0.84;
+  margin-bottom: 48px;
+  border-radius: 32px;
   overflow: hidden;
   padding: 0;
+  flex-shrink: 0;
 }
 
 .home__hero-map {
