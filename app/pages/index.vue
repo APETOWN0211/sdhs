@@ -128,24 +128,13 @@ onBeforeUnmount(() => {
         </p>
 
         <!-- TODO: 메인 이미지 준비되면 교체 -->
-        <div class="home__hero-placeholder" aria-label="메인 이미지 (준비 중)">
-          <svg
-            class="home__hero-placeholder-icon"
-            width="64"
-            height="64"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-          >
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="M21 15l-5-5L5 21" />
-          </svg>
-        </div>
+        <div class="home__hero-placeholder">
+  <img
+    src="/smallmap.webp"
+    alt="서울디자인고등학교 졸업전시 위치 안내 약도"
+    class="home__hero-map"
+  />
+</div>
 
         <div class="home__hero-actions">
           <NuxtLink to="/projects" class="home__hero-btn home__hero-btn--primary">
@@ -307,19 +296,16 @@ onBeforeUnmount(() => {
 }
 
 .home__hero-placeholder {
-  width: clamp(280px, 29vw, 520px);
-  aspect-ratio: 1 / 0.84;
-  background: #ececec;
-  border-radius: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 0 52px;
-  color: #c6c6c6;
+  overflow: hidden;
+  padding: 0;
 }
 
-.home__hero-placeholder-icon {
+.home__hero-map {
   display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
 }
 
 .home__hero-actions {
